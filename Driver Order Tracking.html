@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Driver Order Tracking</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .order-card {
+      border: 2px solid #3498db;
+      border-radius: 10px;
+      padding: 15px;
+      margin-bottom: 15px;
+      background-color: #f8f9fa;
+    }
+    .cancelled {
+      border-color: #e74c3c;
+      background-color: #fee;
+    }
+    .status-badge {
+      padding: 5px 10px;
+      border-radius: 20px;
+      font-weight: bold;
+    }
+    .waiting {
+      background-color: #f39c12;
+      color: white;
+    }
+    .active {
+      background-color: #2ecc71;
+      color: white;
+    }
+    .cancelled-badge {
+      background-color: #e74c3c;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div id="orderContainer">
+    <h2>Order Details</h2>
+    <div id="orderInfo">Loading order data...</div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+  <script>
+    // Konfigurasi dari URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const firebaseConfig = {
+      apiKey: urlParams.get('apiKey'),
+      databaseURL: urlParams.get('databaseURL'),
+      projectId: urlParams.get('projectId')
+    };
+    const driverId = urlParams.get('driverId') || 'default-driver-id';
+    const orderId = urlParams.get('orderId');
+
+    // Inisialisasi Firebase
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+    const orderRef = database.ref(`GoMotorcycle/${orderId}`);
+
+    // Fungsi untuk update tampilan
+    function updateOrderDisplay(orderData) {
+      const orderInfo = document.getElementById('orderInfo');
+      
+      if (!orderData) {
+        orderInfo.innerHTML = '<p>Order tidak ditemukan</p>';
+        return;
+      }
+
+      const isCancelled = orderData.status === 'order dibatalkan';
+      const isActive = orderData.status === 'diambil' && orderData.driver_id === driverId;
+
+      orderInfo.innerHTML = `
+        <div class="order-card ${isCancelled ? 'cancelled' : ''}">
+          <h3>Order #${orderId}</h3>
+          <p><strong>Nama:</strong> ${orderData.name || '-'}</p>
+          <p><strong>Dari:</strong> ${orderData.alamat_a || '-'}</p>
+          <p><strong>Tujuan:</strong> ${orderData.alamat_b || '-'}</p>
+          <p><strong>Harga:</strong> Rp${orderData.harga || '0'}</p>
+          <p>
+            <strong>Status:</strong> 
+            <span class="status-badge ${
+              isCancelled ? 'cancelled-badge' : 
+              isActive ? 'active' : 'waiting'
+            }">
+              ${orderData.status || 'unknown'}
+            </span>
+          </p>
+          ${isCancelled ? '<p class="cancellation-message">⚠️ Order ini telah dibatalkan</p>' : ''}
+        </div>
+      `;
+    }
+
+    // Fungsi untuk mengirim data ke App Inventor
+    function sendToApp(messageType, orderData) {
+      if (window.AppInventor) {
+        const message = {
+          type: messageType,
+          orderId: orderId,
+          driverId: driverId,
+          status: orderData.status,
+          timestamp: new Date().toISOString(),
+          data: orderData
+        };
+        window.AppInventor.setWebViewString(JSON.stringify(message));
+      }
+    }
+
+    // Listen untuk perubahan status order
+    orderRef.on('value', (snapshot) => {
+      const orderData = snapshot.val();
+      
+      // Parse jika data berupa string JSON
+      const parsedData = typeof orderData === 'string' ? 
+        JSON.parse(orderData) : orderData;
+      
+      updateOrderDisplay(parsedData);
+
+      // Jika order dibatalkan, kirim notifikasi
+      if (parsedData && parsedData.status === 'order dibatalkan') {
+        sendToApp('ORDER_CANCELLED', parsedData);
+        
+        // Tambahkan alert untuk debugging (bisa dihapus di production)
+        alert(`Order ${orderId} telah dibatalkan!`);
+      }
+      
+      // Jika order aktif dan diambil oleh driver ini
+      if (parsedData && parsedData.status === 'diambil' && parsedData.driver_id === driverId) {
+        sendToApp('ORDER_ACTIVE', parsedData);
+      }
+    });
+
+    // Handle error
+    orderRef.on('error', (error) => {
+      console.error('Firebase error:', error);
+      document.getElementById('orderInfo').innerHTML = 
+        '<p class="error">Gagal memuat data order</p>';
+    });
+  </script>
+</body>
+</html>
